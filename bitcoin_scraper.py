@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime
 import os
 import logging
+from fredapi import Fred
 
 # Configure logging
 logging.basicConfig(
@@ -15,19 +16,43 @@ try:
     logging.info("Starting Bitcoin price scraping process...")
     cg = CoinGeckoAPI()
 
-    # Get Bitcoin price data for the last 90 days
-    logging.info("Fetching Bitcoin price data from CoinGecko...")
-    data = cg.get_coin_market_chart_by_id(id='bitcoin', vs_currency='usd', days=90)
+    # Initialize FRED API with your API key
+    fred = Fred(api_key='2c224f339cc10721c3896180e9fdb66d')  # Jouw FRED API-sleutel
 
-    # Convert timestamps to readable dates and collect prices
+    # Get Bitcoin price data for the last 120 days
+    logging.info("Fetching Bitcoin price data from CoinGecko...")
+    data = cg.get_coin_market_chart_by_id(id='bitcoin', vs_currency='usd', days=120)
+
+    # Convert timestamps to readable dates (without time) and collect prices
     logging.info("Processing price data into DataFrame...")
     prices = [(datetime.fromtimestamp(p[0]/1000).strftime('%Y-%m-%d'), p[1], None, None) for p in data['prices']]
     df = pd.DataFrame(prices, columns=['Date', 'Bitcoin Price', 'Global Liquidity (M2)', 'Expected Bitcoin Price'])
 
+    # Get M2 data from FRED (last 365 days for better data availability)
+    logging.info("Fetching M2 data from FRED...")
+    end_date = datetime.now().strftime('%Y-%m-%d')
+    start_date = (datetime.now() - pd.Timedelta(days=365)).strftime('%Y-%m-%d')  # Extended to 1 year
+    m2_data = fred.get_series('M2SL', observation_start=start_date, observation_end=end_date)
+
+    # Convert M2 index to datetime and interpolate to daily
+    m2_df = m2_data.reset_index()
+    m2_df.columns = ['Date', 'Global Liquidity (M2)']
+    m2_df['Date'] = pd.to_datetime(m2_df['Date'])  # Convert to datetime
+    m2_df['Date'] = m2_df['Date'].dt.strftime('%Y-%m-%d')  # Format as string without time
+    m2_df = pd.DataFrame(m2_df)  # Ensure it's a DataFrame
+
     # Group by date and calculate the average price per day, preserving other columns
     logging.info("Calculating daily average prices...")
     daily_avg_df = df.groupby('Date', as_index=False).agg({'Bitcoin Price': 'mean', 'Global Liquidity (M2)': 'first', 'Expected Bitcoin Price': 'first'})
-    daily_avg_df['Date'] = daily_avg_df['Date']  # Ensure Date is preserved as is
+    daily_avg_df['Date'] = pd.to_datetime(daily_avg_df['Date'])  # Convert to datetime
+    daily_avg_df['Date'] = daily_avg_df['Date'].dt.strftime('%Y-%m-%d')  # Format as string without time
+
+    # Drop the original empty Global Liquidity (M2) column before merging
+    daily_avg_df = daily_avg_df.drop(columns=['Global Liquidity (M2)'])
+
+    # Merge M2 data with Bitcoin data
+    logging.info("Merging M2 data with Bitcoin data...")
+    daily_avg_df = daily_avg_df.merge(m2_df, on='Date', how='left')
 
     # Sort by date descending (newest first)
     logging.info("Sorting data by date (newest first)...")
@@ -51,8 +76,11 @@ try:
         for idx, column in enumerate(['Date', 'Bitcoin Price', 'Global Liquidity (M2)', 'Expected Bitcoin Price']):
             # Set base length from column name
             base_length = len(str(column))
-            # For columns with data, use max of name or data length; for empty columns, use minimum 25
-            if daily_avg_df[column].isna().all():
+            # Fixed width for Date column (12 for "YYYY-MM-DD" with padding)
+            if column == 'Date':
+                max_length = 12
+            # For other columns, use max of name or data length; minimum 25 for empty columns
+            elif daily_avg_df[column].isna().all():
                 max_length = max(base_length, 25)  # Minimum 25 for long empty titles
             else:
                 max_length = max(base_length, daily_avg_df[column].astype(str).str.len().max())
