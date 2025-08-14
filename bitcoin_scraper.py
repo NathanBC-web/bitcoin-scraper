@@ -54,6 +54,10 @@ try:
     logging.info("Merging M2 data with Bitcoin data...")
     daily_avg_df = daily_avg_df.merge(m2_df, on='Date', how='left')
 
+    # Reorder columns to have Expected Bitcoin Price as the last column
+    logging.info("Reordering columns...")
+    daily_avg_df = daily_avg_df[['Date', 'Bitcoin Price', 'Global Liquidity (M2)', 'Expected Bitcoin Price']]
+
     # Sort by date descending (newest first)
     logging.info("Sorting data by date (newest first)...")
     daily_avg_df = daily_avg_df.sort_values(by='Date', ascending=False)
