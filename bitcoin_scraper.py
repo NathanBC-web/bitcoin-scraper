@@ -21,20 +21,17 @@ try:
 
     # Convert timestamps to readable dates and collect prices
     logging.info("Processing price data into DataFrame...")
-    prices = [(datetime.fromtimestamp(p[0]/1000).strftime('%Y-%m-%d'), p[1]) for p in data['prices']]
-    df = pd.DataFrame(prices, columns=['Date', 'Bitcoin Price'])
+    prices = [(datetime.fromtimestamp(p[0]/1000).strftime('%Y-%m-%d'), p[1], None, None) for p in data['prices']]
+    df = pd.DataFrame(prices, columns=['Date', 'Bitcoin Price', 'Global Liquidity (M2)', 'Expected Bitcoin Price'])
 
-    # Group by date and calculate the average price per day
+    # Group by date and calculate the average price per day, preserving other columns
     logging.info("Calculating daily average prices...")
-    daily_avg_df = df.groupby('Date', as_index=False).mean()
+    daily_avg_df = df.groupby('Date', as_index=False).agg({'Bitcoin Price': 'mean', 'Global Liquidity (M2)': 'first', 'Expected Bitcoin Price': 'first'})
+    daily_avg_df['Date'] = daily_avg_df['Date']  # Ensure Date is preserved as is
 
     # Sort by date descending (newest first)
     logging.info("Sorting data by date (newest first)...")
     daily_avg_df = daily_avg_df.sort_values(by='Date', ascending=False)
-
-    # Add empty Expected Bitcoin Price column
-    logging.info("Adding empty Expected Bitcoin Price column...")
-    daily_avg_df['Expected Bitcoin Price'] = None
 
     # Define output path with timestamp
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -51,12 +48,15 @@ try:
         # Adjust column widths
         workbook = writer.book
         worksheet = writer.sheets['Bitcoin Prices']
-        for column in ['Date', 'Bitcoin Price', 'Expected Bitcoin Price']:
-            max_length = max(
-                len(str(column)),
-                daily_avg_df[column].astype(str).str.len().max() if column != 'Expected Bitcoin Price' else len(column)
-            )
-            worksheet.column_dimensions[column[0]].width = max_length + 2  # Add padding
+        for idx, column in enumerate(['Date', 'Bitcoin Price', 'Global Liquidity (M2)', 'Expected Bitcoin Price']):
+            # Set base length from column name
+            base_length = len(str(column))
+            # For columns with data, use max of name or data length; for empty columns, use minimum 25
+            if daily_avg_df[column].isna().all():
+                max_length = max(base_length, 25)  # Minimum 25 for long empty titles
+            else:
+                max_length = max(base_length, daily_avg_df[column].astype(str).str.len().max())
+            worksheet.column_dimensions[chr(65 + idx)].width = max_length + 2  # A=65, B=66, etc., with padding
 
         # Freeze the header row (row 1)
         worksheet.freeze_panes = 'A2'
