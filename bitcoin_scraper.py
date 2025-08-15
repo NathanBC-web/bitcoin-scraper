@@ -4,6 +4,8 @@ from datetime import datetime
 import os
 import logging
 from fredapi import Fred
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 
 # Configure logging
 logging.basicConfig(
@@ -16,8 +18,8 @@ try:
     logging.info("Starting Bitcoin price scraping process...")
     cg = CoinGeckoAPI()
 
-    # Initialize FRED API with API key from environment variable
-    fred = Fred(api_key=os.getenv('FRED_API_KEY'))
+    # Initialize FRED API with your API key
+    fred = Fred(api_key=os.getenv('FRED_API_KEY'))  # Using environment variable
 
     # Get Bitcoin price data for the last 120 days
     logging.info("Fetching Bitcoin price data from CoinGecko...")
@@ -34,12 +36,12 @@ try:
     start_date = (datetime.now() - pd.Timedelta(days=365)).strftime('%Y-%m-%d')  # Extended to 1 year
     m2_data = fred.get_series('M2SL', observation_start=start_date, observation_end=end_date)
 
-    # Convert M2 index to datetime and interpolate to daily
+    # Convert M2 index to datetime and interpolate to daily (average approximation)
     m2_df = m2_data.reset_index()
     m2_df.columns = ['Date', 'Global Liquidity (M2)']
-    m2_df['Date'] = pd.to_datetime(m2_df['Date'])  # Convert to datetime
+    m2_df['Date'] = pd.to_datetime(m2_df['Date'])
+    m2_df = m2_df.set_index('Date').resample('D').interpolate(method='linear').reset_index()
     m2_df['Date'] = m2_df['Date'].dt.strftime('%Y-%m-%d')  # Format as string without time
-    m2_df = pd.DataFrame(m2_df)  # Ensure it's a DataFrame
 
     # Group by date and calculate the average price per day, preserving other columns
     logging.info("Calculating daily average prices...")
@@ -88,7 +90,19 @@ try:
                 max_length = max(base_length, 25)  # Minimum 25 for long empty titles
             else:
                 max_length = max(base_length, daily_avg_df[column].astype(str).str.len().max())
-            worksheet.column_dimensions[chr(65 + idx)].width = max_length + 2  # A=65, B=66, etc., with padding
+            worksheet.column_dimensions[get_column_letter(idx + 1)].width = max_length + 2
+
+        # Freeze the header row (row 1)
+        worksheet.freeze_panes = 'A2'
+
+        # Apply formatting to Global Liquidity (M2) column
+        m2_original_dates = m2_data.index.strftime('%Y-%m-%d').tolist()  # Original FRED dates
+        for row in worksheet.iter_rows(min_row=2, min_col=3, max_col=3):  # Column 3 is Global Liquidity (M2)
+            for cell in row:
+                if pd.notna(cell.value) and str(cell.offset(column=-2).value) in m2_original_dates:
+                    cell.font = Font(bold=True)  # Bold for original data
+                elif pd.notna(cell.value):
+                    cell.font = Font(color="808080")  # Gray text for interpolated data
 
         # Freeze the header row (row 1)
         worksheet.freeze_panes = 'A2'
