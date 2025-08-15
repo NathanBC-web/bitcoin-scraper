@@ -16,8 +16,8 @@ try:
     logging.info("Starting Bitcoin price scraping process...")
     cg = CoinGeckoAPI()
 
-    # Initialize FRED API with your API key
-    fred = Fred(api_key='2c224f339cc10721c3896180e9fdb66d')  # Jouw FRED API-sleutel
+    # Initialize FRED API with API key from environment variable
+    fred = Fred(api_key=os.getenv('FRED_API_KEY'))
 
     # Get Bitcoin price data for the last 120 days
     logging.info("Fetching Bitcoin price data from CoinGecko...")
